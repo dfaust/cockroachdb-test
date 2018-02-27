@@ -1,0 +1,12 @@
+[package]
+name = "cockroachdb-test"
+version = "0.1.0"
+authors = ["Daniel Faust <hessijames@gmail.com>"]
+
+[dependencies]
+postgres = { version = "0.15.2", features = ["with-uuid"] }
+r2d2 = "0.8.2"
+r2d2_postgres = "0.14.0"
+uuid = { version = "0.5.0", features = ["v4"] }
+rand = "0.4.0"
+rayon = "1.0.0"
