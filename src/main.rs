@@ -107,30 +107,38 @@ fn select_docs(conn: &Connection, user_id: Uuid, batch_size: usize, iterations: 
 
             let doc_ids = doc_ids.join("', '");
 
+            // let query = format!("
+            //     SELECT
+            //         docs.user_id, docs.doc_id, docs.revision, docs.payload
+            //     FROM
+            //         (SELECT
+            //             user_id, doc_id, MAX(revision) as max_revision
+            //         FROM
+            //             docs
+            //         WHERE
+            //             docs.user_id = '{}'
+            //         AND
+            //             docs.doc_id IN ('{}')
+            //         GROUP BY
+            //             user_id, doc_id
+            //         ) AS temp
+            //     JOIN
+            //         docs
+            //     ON
+            //         docs.user_id = temp.user_id
+            //     AND
+            //         docs.doc_id = temp.doc_id
+            //     AND
+            //         docs.revision = temp.max_revision
+            //     ", user_id, doc_ids);
+
             let query = format!("
-                SELECT
-                    docs.user_id, docs.doc_id, docs.revision, docs.payload
-                FROM
-                    (SELECT
-                        user_id, doc_id, MAX(revision) as max_revision
-                    FROM
-                        docs
-                    WHERE
-                        docs.user_id = '{}'
-                    AND
-                        docs.doc_id IN ('{}')
-                    GROUP BY
-                        user_id, doc_id
-                    ) AS temp
-                LEFT JOIN
-                    docs
-                ON
-                    docs.user_id = temp.user_id
-                AND
-                    docs.doc_id = temp.doc_id
-                AND
-                    docs.revision = temp.max_revision
-                ", user_id, doc_ids);
+                SELECT DISTINCT ON(user_id, doc_id)
+                    user_id, doc_id, revision, payload
+                FROM docs
+                WHERE docs.user_id = '{}' AND docs.doc_id IN ('{}')
+                ORDER BY user_id, doc_id, revision DESC
+            ", user_id, doc_ids);
 
             conn.execute(&query, &[])?;
         }
