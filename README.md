@@ -2,7 +2,7 @@
 
 ```sh
 docker volume create --name cockroach-c472921b-db
-docker run --name cockroach-c472921b --hostname=roach-c472921b -v cockroach-c472921b-db:/cockroach/cockroach-data -p 26257:26257 -p 8080:8080 --memory="512m" --memory-swap="512m" --cpuset-cpus="2,3" -d cockroachdb/cockroach-unstable:v2.0-alpha.20180212 start --cache="25%" --max-sql-memory="25%" --insecure
+docker run --name cockroach-c472921b --hostname=roach-c472921b -v cockroach-c472921b-db:/cockroach/cockroach-data -p 26257:26257 -p 8080:8080 --memory="512m" --memory-swap="512m" --cpuset-cpus="2,3" -d cockroachdb/cockroach-unstable:v2.0-beta.20180305 start --cache="25%" --max-sql-memory="25%" --insecure
 ```
 
 ```sh
@@ -56,7 +56,9 @@ CREATE TABLE docs (
 ```sh
 cargo run -- load cockroachdb
 cargo run -- run cockroachdb 0
-cargo run -- run cockroachdb 1 # NOTE: very slow, must be aborted
+cargo run -- run cockroachdb 1
+cargo run -- run cockroachdb 2
+cargo run -- run cockroachdb 4
 ```
 
 ```sh
