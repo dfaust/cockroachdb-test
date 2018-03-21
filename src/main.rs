@@ -6,7 +6,7 @@ extern crate rand;
 extern crate rayon;
 
 use postgres::{Connection, Result};
-use postgres::transaction::Transaction;
+use postgres::transaction::{Transaction, IsolationLevel, Config};
 use postgres::error::T_R_SERIALIZATION_FAILURE;
 use r2d2_postgres::{TlsMode, PostgresConnectionManager};
 use uuid::Uuid;
@@ -25,6 +25,7 @@ where
     F: FnMut(&Transaction) -> Result<T>,
 {
     let txn = conn.transaction()?;
+    txn.set_config(Config::new().isolation_level(IsolationLevel::Serializable)).unwrap();
     loop {
         let sp = txn.savepoint("cockroach_restart")?;
         match op(&sp).and_then(|t| sp.commit().map(|_| t)) {
@@ -98,15 +99,22 @@ fn select_docs(conn: &Connection, user_id: Uuid, batch_size: usize, iterations: 
                 })
                 .collect::<Vec<_>>();
 
-            let query = "
+            let doc_ids = doc_ids
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>();
+
+            let doc_ids = doc_ids.join("', '");
+
+            let query = format!("
                 SELECT DISTINCT ON(user_id, doc_id)
                     user_id, doc_id, revision, payload
                 FROM docs
-                WHERE docs.user_id = $1 AND docs.doc_id = ANY ($2)
+                WHERE docs.user_id = '{}' AND docs.doc_id IN ('{}')
                 ORDER BY user_id, doc_id, revision DESC
-            ";
+            ", user_id, doc_ids);
 
-            conn.execute(&query, &[&user_id, &doc_ids])?;
+            conn.execute(&query, &[])?;
         }
     }
     Ok(())
@@ -172,5 +180,89 @@ fn main() {
     if action == "run" {
         let rows_per_transaction = max(batch_size, 1);
         println!("rows/s: {}", rows_per_transaction as f64 * transactions_per_second);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::thread;
+    use std::time::Duration;
+
+    #[test]
+    #[should_panic(expected = "40001")]
+    fn conflicting_transactions_cockroachdb() {
+        conflicting_transactions(COCKROACHDB_URL);
+    }
+
+    #[test]
+    #[should_panic(expected = "40001")]
+    fn conflicting_transactions_postgresql() {
+        conflicting_transactions(POSTGRESQL_URL);
+    }
+
+    fn conflicting_transactions(url: &str) {
+        let manager = PostgresConnectionManager::new(url, TlsMode::None).unwrap();
+        let pool = r2d2::Pool::builder()
+            .max_size(4)
+            .build(manager)
+            .unwrap();
+
+        let conn = pool.get().unwrap();
+
+        let query = "INSERT INTO ctr (ctr_id, val) VALUES (1, 0) ON CONFLICT (ctr_id) DO UPDATE SET val=0";
+        conn.execute(&query, &[]).unwrap();
+
+        let local_pool = pool.clone();
+        let slow_transaction = thread::spawn(move || {
+            let conn = local_pool.get().unwrap();
+            execute_txn_once(&conn, |txn| transaction_slow(txn));
+        });
+
+        execute_txn_once(&conn, |txn| transaction_fast(txn));
+
+        slow_transaction.join().unwrap();
+
+        let query = "SELECT val, upd_slow, upd_fast FROM ctr WHERE ctr_id=1";
+        if let Some(row) = conn.query(query, &[]).unwrap().iter().nth(0) {
+            let val: i64 = row.get(0);
+            let upd_slow: bool = row.get(1);
+            let upd_fast: bool = row.get(2);
+            assert_eq!(val, 1, "val");
+            assert_eq!(upd_slow, false, "upd slow");
+            assert_eq!(upd_fast, true, "upd fast");
+        } else {
+            panic!();
+        }
+    }
+
+    fn execute_txn_once<F>(conn: &Connection, mut op: F)
+    where
+        F: FnMut(&Transaction)
+    {
+        let txn = conn.transaction().unwrap();
+        txn.set_config(Config::new().isolation_level(IsolationLevel::Serializable)).unwrap();
+        op(&txn);
+        txn.commit().unwrap();
+    }
+
+    fn transaction_slow(txn: &Transaction) {
+        let query = "SELECT val FROM ctr WHERE ctr_id=1";
+        let mut val: i64 = txn.query(query, &[]).unwrap().get(0).get(0);
+        val += 1;
+
+        thread::sleep(Duration::from_millis(100));
+
+        let query = "UPDATE ctr SET val=$1, upd_slow=true WHERE ctr_id=1";
+        txn.execute(query, &[&val]).unwrap();
+    }
+
+    fn transaction_fast(txn: &Transaction) {
+        let query = "SELECT val FROM ctr WHERE ctr_id=1";
+        let mut val: i64 = txn.query(query, &[]).unwrap().get(0).get(0);
+        val += 1;
+
+        let query = "UPDATE ctr SET val=$1, upd_fast=true WHERE ctr_id=1";
+        txn.execute(query, &[&val]).unwrap();
     }
 }

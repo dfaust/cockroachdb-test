@@ -24,6 +24,14 @@ CREATE TABLE docs (
   payload bytes,
   PRIMARY KEY (user_id ASC, doc_id ASC, revision DESC)
 );
+
+CREATE TABLE ctr (
+  ctr_id int,
+  val int,
+  upd_slow bool,
+  upd_fast bool,
+  PRIMARY KEY (ctr_id)
+);
 ```
 
 # setup postgresql
@@ -48,6 +56,14 @@ CREATE TABLE docs (
   revision bigint,
   payload bytea,
   PRIMARY KEY (user_id, doc_id, revision)
+);
+
+CREATE TABLE ctr (
+  ctr_id bigint,
+  val bigint,
+  upd_slow bool,
+  upd_fast bool,
+  PRIMARY KEY (ctr_id)
 );
 ```
 
