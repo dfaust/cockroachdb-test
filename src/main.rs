@@ -70,8 +70,6 @@ fn select_docs(conn: &Connection, user_id: Uuid, batch_size: usize, iterations: 
     let index_range: Range<usize> = Range::new(0, num_docs);
 
     for _ in 0..iterations {
-        let now = SystemTime::now();
-
         if batch_size == 0 {
             let index = index_range.ind_sample(&mut rng2);
             let doc_id = all_doc_ids[index];
@@ -100,50 +98,16 @@ fn select_docs(conn: &Connection, user_id: Uuid, batch_size: usize, iterations: 
                 })
                 .collect::<Vec<_>>();
 
-            let doc_ids = doc_ids
-                .iter()
-                .map(ToString::to_string)
-                .collect::<Vec<_>>();
-
-            let doc_ids = doc_ids.join("', '");
-
-            // let query = format!("
-            //     SELECT
-            //         docs.user_id, docs.doc_id, docs.revision, docs.payload
-            //     FROM
-            //         (SELECT
-            //             user_id, doc_id, MAX(revision) as max_revision
-            //         FROM
-            //             docs
-            //         WHERE
-            //             docs.user_id = '{}'
-            //         AND
-            //             docs.doc_id IN ('{}')
-            //         GROUP BY
-            //             user_id, doc_id
-            //         ) AS temp
-            //     JOIN
-            //         docs
-            //     ON
-            //         docs.user_id = temp.user_id
-            //     AND
-            //         docs.doc_id = temp.doc_id
-            //     AND
-            //         docs.revision = temp.max_revision
-            //     ", user_id, doc_ids);
-
-            let query = format!("
+            let query = "
                 SELECT DISTINCT ON(user_id, doc_id)
                     user_id, doc_id, revision, payload
                 FROM docs
-                WHERE docs.user_id = '{}' AND docs.doc_id IN ('{}')
+                WHERE docs.user_id = $1 AND docs.doc_id = ANY ($2)
                 ORDER BY user_id, doc_id, revision DESC
-            ", user_id, doc_ids);
+            ";
 
-            conn.execute(&query, &[])?;
+            conn.execute(&query, &[&user_id, &doc_ids])?;
         }
-
-        println!("query took: {:?}", now.elapsed().unwrap());
     }
     Ok(())
 }
